@@ -1,4 +1,4 @@
-require('dotenv').config(); // Carga las variables de entorno - DEBE SER LA PRIMERA LÍNEA
+require('dotenv').config(); 
 
 console.log('--- DEBUG (index.js): Punto 1 - Archivo index.js iniciado. ---');
 

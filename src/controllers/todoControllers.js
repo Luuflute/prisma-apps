@@ -1,117 +1,141 @@
-const { PrismaClient } = require('@prisma/client');
-const prisma = new PrismaClient();
+import { prisma } from '../server.js';
 
-// Crear Tarea para un Usuario
-async function createTodo(req, res) {
-  const { userId } = req.params;
-  const { label, completed } = req.body;
+export const createTodo = async (req, res) => {
   try {
+    const userId = parseInt(req.params.userId);
+    if (isNaN(userId)) {
+      return res.status(400).json({ error: 'userId inválido en la ruta' });
+    }
+
+    // Validar si el usuario existe
+    const userExists = await prisma.user.findUnique({
+      where: { id: userId }
+    });
+
+    if (!userExists) {
+      return res.status(404).json({ error: 'Usuario no encontrado' });
+    }
+
+    // Crear nueva tarea
     const newTodo = await prisma.todo.create({
       data: {
-        label,
-        completed: completed !== undefined ? completed : false, // Asegura que 'completed' sea un booleano, por defecto false
-        userId: parseInt(userId),
-      },
+        label: req.body.label,
+        description: req.body.description || null, // <-- Nuevo campo
+        completed: req.body.completed || false,
+        userId: userId
+      }
     });
+
     res.status(201).json(newTodo);
   } catch (error) {
-    if (error.code === 'P2003') { // Falla de llave foránea (userId no existe)
-      res.status(404).json({ error: 'El usuario especificado no existe.' });
-    } else {
-      res.status(500).json({ error: 'No se pudo crear la tarea.' });
-    }
+    res.status(400).json({ error: error.message });
   }
-}
+};
 
-// Obtener Todas las Tareas de un Usuario
-async function getTodosByUserId(req, res) {
-  const { userId } = req.params;
+export const getAllTodosByUser = async (req, res) => {
   try {
+    const userId = parseInt(req.params.userId);
+    
     const todos = await prisma.todo.findMany({
-      where: {
-        userId: parseInt(userId),
-      },
+      where: { userId: userId }
     });
-    res.status(200).json(todos);
+    
+    res.json(todos);
   } catch (error) {
-    res.status(500).json({ error: 'No se pudieron obtener las tareas del usuario.' });
+    res.status(500).json({ error: error.message });
   }
-}
+};
 
-// Obtener Tarea Específica de un Usuario
-async function getTodoByUserIdAndTodoId(req, res) {
-  const { userId, todoId } = req.params;
+export const getTodoById = async (req, res) => {
   try {
+    const userId = parseInt(req.params.userId);
+    const todoId = parseInt(req.params.todoId);
+    
     const todo = await prisma.todo.findUnique({
-      where: {
-        id_userId: { // Usa el @@unique definido en schema.prisma
-          id: parseInt(todoId),
-          userId: parseInt(userId),
-        },
-      },
+      where: { id: todoId }
     });
+    
     if (!todo) {
-      return res.status(404).json({ error: 'Tarea no encontrada para el usuario especificado.' });
+      return res.status(404).json({ error: 'Tarea no encontrada' });
     }
-    res.status(200).json(todo);
+    
+    if (todo.userId !== userId) {
+      return res.status(403).json({ error: 'Esta tarea no pertenece al usuario especificado' });
+    }
+    
+    res.json(todo);
   } catch (error) {
-    res.status(500).json({ error: 'No se pudo obtener la tarea.' });
+    res.status(500).json({ error: error.message });
   }
-}
+};
 
-// Actualizar Tarea de un Usuario
-async function updateTodo(req, res) {
-  const { userId, todoId } = req.params;
-  const { label, completed } = req.body;
+export const updateTodo = async (req, res) => {
   try {
+    const userId = parseInt(req.params.userId);
+    const todoId = parseInt(req.params.todoId);
+    
+    // Verificar que la tarea exista y pertenezca al usuario
+    const todo = await prisma.todo.findUnique({
+      where: { id: todoId }
+    });
+    
+    if (!todo) {
+      return res.status(404).json({ error: 'Tarea no encontrada' });
+    }
+    
+    if (todo.userId !== userId) {
+      return res.status(403).json({ error: 'No tienes permiso para modificar esta tarea' });
+    }
+    
+    // Actualizar la tarea
     const updatedTodo = await prisma.todo.update({
-      where: {
-        id_userId: { // Usa el @@unique definido en schema.prisma
-          id: parseInt(todoId),
-          userId: parseInt(userId),
-        },
-      },
+      where: { id: todoId },
       data: {
-        label,
-        completed,
-      },
+        label: req.body.label || todo.label,
+        description: req.body.description !== undefined ? req.body.description : todo.description, // <-- Nuevo campo
+        completed: req.body.completed !== undefined ? req.body.completed : todo.completed
+      }
     });
-    res.status(200).json(updatedTodo);
+    
+    res.json(updatedTodo);
   } catch (error) {
-    if (error.code === 'P2025') { // No se encontró el registro para actualizar
-      res.status(404).json({ error: 'Tarea no encontrada para actualizar o no pertenece a este usuario.' });
+    if (error.code === 'P2025') {
+      res.status(404).json({ error: 'Tarea no encontrada' });
     } else {
-      res.status(500).json({ error: 'No se pudo actualizar la tarea.' });
+      res.status(500).json({ error: error.message });
     }
   }
-}
+};
 
-// Eliminar Tarea de un Usuario
-async function deleteTodo(req, res) {
-  const { userId, todoId } = req.params;
+export const deleteTodo = async (req, res) => {
   try {
-    await prisma.todo.delete({
-      where: {
-        id_userId: { // Usa el @@unique definido en schema.prisma
-          id: parseInt(todoId),
-          userId: parseInt(userId),
-        },
-      },
+    const userId = parseInt(req.params.userId);
+    const todoId = parseInt(req.params.todoId);
+    
+    // Verificar que la tarea exista y pertenezca al usuario
+    const todo = await prisma.todo.findUnique({
+      where: { id: todoId }
     });
-    res.status(200).json({ message: 'Tarea eliminada exitosamente.' });
+    
+    if (!todo) {
+      return res.status(404).json({ error: 'Tarea no encontrada' });
+    }
+    
+    if (todo.userId !== userId) {
+      return res.status(403).json({ error: 'No tienes permiso para eliminar esta tarea' });
+    }
+    
+    // Eliminar la tarea
+    const deletedTodo = await prisma.todo.delete({
+      where: { id: todoId }
+    });
+    
+    res.json({ message: 'Tarea eliminada', todo: deletedTodo });
   } catch (error) {
-    if (error.code === 'P2025') { // No se encontró el registro para eliminar
-      res.status(404).json({ error: 'Tarea no encontrada para eliminar o no pertenece a este usuario.' });
+    if (error.code === 'P2025') {
+      res.status(404).json({ error: 'Tarea no encontrada' });
     } else {
-      res.status(500).json({ error: 'No se pudo eliminar la tarea.' });
+      res.status(500).json({ error: error.message });
     }
   }
-}
-
-module.exports = {
-  createTodo,
-  getTodosByUserId,
-  getTodoByUserIdAndTodoId,
-  updateTodo,
-  deleteTodo,
 };

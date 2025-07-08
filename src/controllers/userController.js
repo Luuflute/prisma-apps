@@ -1,107 +1,115 @@
-const { PrismaClient } = require('@prisma/client');
-const prisma = new PrismaClient();
+import { prisma } from '../server.js';
 
-// Crear Usuario
-async function createUser(req, res) {
-  const { username, email } = req.body;
+/**
+ * Handles common Prisma errors and sends appropriate HTTP responses.
+ * @param {object} res - The Express response object.
+ * @param {Error} error - The caught error object.
+ */
+const handlePrismaError = (res, error) => {
+  switch (error.code) {
+    case 'P2002': // Unique constraint violation
+      return res.status(409).json({ error: 'Duplicate entry: Username or email already exists.', details: error.meta?.target });
+    case 'P2025': // Record not found (e.g., for update/delete)
+      return res.status(404).json({ error: 'Resource not found.' });
+    case 'P2003': // Foreign key constraint violation
+      return res.status(400).json({ error: 'Related record not found or cannot be deleted.', details: error.meta?.field_name });
+    default:
+      // Catch-all for unexpected errors
+      console.error('Unhandled Prisma error:', error); // Log the full error for debugging
+      return res.status(500).json({ error: 'An unexpected server error occurred.', details: error.message });
+  }
+};
+
+export const createUser = async (req, res) => {
   try {
+    const { username, email } = req.body;
+
+    if (!username || !email) {
+      return res.status(400).json({ error: 'Username and email are required fields.' });
+    }
+
     const newUser = await prisma.user.create({
-      data: {
-        username,
-        email,
-      },
+      data: { username, email },
     });
+
     res.status(201).json(newUser);
   } catch (error) {
-    if (error.code === 'P2002') { // Error de entrada única duplicada (username o email)
-      res.status(409).json({ error: 'El username o email ya existe.' });
-    } else {
-      res.status(500).json({ error: 'No se pudo crear el usuario.' });
-    }
+    handlePrismaError(res, error);
   }
-}
+};
 
-// Obtener Todos los Usuarios
-async function getAllUsers(req, res) {
+export const getAllUsers = async (req, res) => {
   try {
     const users = await prisma.user.findMany();
-    res.status(200).json(users);
+    res.json(users);
   } catch (error) {
-    res.status(500).json({ error: 'No se pudieron obtener los usuarios.' });
+    // For read operations, a 500 is usually appropriate for database issues
+    res.status(500).json({ error: 'Failed to retrieve users.', details: error.message });
   }
-}
+};
 
-// Obtener Usuario por ID
-async function getUserById(req, res) {
-  const { id } = req.params;
+export const getUserById = async (req, res) => {
   try {
+    const userId = parseInt(req.params.id);
+
+    if (isNaN(userId)) {
+      return res.status(400).json({ error: 'Invalid user ID format. Please provide a number.' });
+    }
+
     const user = await prisma.user.findUnique({
-      where: {
-        id: parseInt(id),
-      },
+      where: { id: userId },
     });
+
     if (!user) {
-      return res.status(404).json({ error: 'Usuario no encontrado.' });
+      return res.status(404).json({ error: 'User with the specified ID not found.' });
     }
-    res.status(200).json(user);
-  } catch (error) {
-    res.status(500).json({ error: 'No se pudo obtener el usuario.' });
-  }
-}
 
-// Actualizar Usuario
-async function updateUser(req, res) {
-  const { id } = req.params;
-  const { username, email } = req.body;
+    res.json(user);
+  } catch (error) {
+    // For single read operations, a 500 is usually appropriate for database issues
+    res.status(500).json({ error: 'Failed to retrieve user.', details: error.message });
+  }
+};
+
+export const updateUser = async (req, res) => {
   try {
+    const userId = parseInt(req.params.id);
+    const updateData = req.body; // Allow partial updates
+
+    if (isNaN(userId)) {
+      return res.status(400).json({ error: 'Invalid user ID format. Please provide a number.' });
+    }
+
+    // Optional: Add validation for updateData if specific fields are expected
+    if (Object.keys(updateData).length === 0) {
+        return res.status(400).json({ error: 'No update data provided.' });
+    }
+
     const updatedUser = await prisma.user.update({
-      where: {
-        id: parseInt(id),
-      },
-      data: {
-        username,
-        email,
-      },
+      where: { id: userId },
+      data: updateData,
     });
-    res.status(200).json(updatedUser);
-  } catch (error) {
-    if (error.code === 'P2025') { // No se encontró el registro para actualizar
-      res.status(404).json({ error: 'Usuario no encontrado para actualizar.' });
-    } else if (error.code === 'P2002') { // Conflicto por username/email duplicado
-      res.status(409).json({ error: 'El username o email ya está en uso.' });
-    }
-    else {
-      res.status(500).json({ error: 'No se pudo actualizar el usuario.' });
-    }
-  }
-}
 
-// Eliminar Usuario
-async function deleteUser(req, res) {
-  const { id } = req.params;
+    res.json(updatedUser);
+  } catch (error) {
+    handlePrismaError(res, error);
+  }
+};
+
+export const deleteUser = async (req, res) => {
   try {
-    await prisma.user.delete({
-      where: {
-        id: parseInt(id),
-      },
-    });
-    res.status(200).json({ message: 'Usuario eliminado exitosamente.' });
-  } catch (error) {
-    if (error.code === 'P2025') { // No se encontró el registro para eliminar
-      res.status(404).json({ error: 'Usuario no encontrado para eliminar.' });
-    } else if (error.code === 'P2003') { // Falla de llave foránea (si hay todos asociados)
-      res.status(409).json({ error: 'No se puede eliminar el usuario porque tiene tareas asociadas. Elimine las tareas primero.' });
-    }
-    else {
-      res.status(500).json({ error: 'No se pudo eliminar el usuario.' });
-    }
-  }
-}
+    const userId = parseInt(req.params.id);
 
-module.exports = {
-  createUser,
-  getAllUsers,
-  getUserById,
-  updateUser,
-  deleteUser,
+    if (isNaN(userId)) {
+      return res.status(400).json({ error: 'Invalid user ID format. Please provide a number.' });
+    }
+
+    const deletedUser = await prisma.user.delete({
+      where: { id: userId },
+    });
+
+    res.json({ message: 'User successfully deleted.', user: deletedUser });
+  } catch (error) {
+    handlePrismaError(res, error);
+  }
 };
